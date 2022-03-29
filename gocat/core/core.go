@@ -12,9 +12,9 @@ import (
 	"github.com/mitre/gocat/output"
 
 	_ "github.com/mitre/gocat/execute/donut"     // necessary to initialize all submodules
+	_ "github.com/mitre/gocat/execute/native"    // necessary to initialize all submodules
 	_ "github.com/mitre/gocat/execute/shellcode" // necessary to initialize all submodules
 	_ "github.com/mitre/gocat/execute/shells"    // necessary to initialize all submodules
-	_ "github.com/mitre/gocat/execute/native"    // necessary to initialize all submodules
 )
 
 // Initializes and returns sandcat agent.
@@ -37,8 +37,40 @@ func Core(server string, tunnelConfig *contact.TunnelConfig, group string, delay
 	}
 }
 
-// Establish contact with C2 and run instructions.
 func runAgent(sandcatAgent *agent.Agent, c2Config map[string]string) {
+	selectedContact, ok := contact.CommunicationChannels[c2Config["c2Name"]]
+	if !ok {
+		output.VerbosePrint(fmt.Sprintf("[!] Requested C2 config not available: %s", c2Config["c2Name"]))
+		output.VerbosePrint("[-] Exiting.")
+	} else {
+		if selectedContact.SupportsContinuous() {
+			runAgentContinuousMode(sandcatAgent, c2Config)
+		} else {
+			runAgentBeaconMode(sandcatAgent, c2Config)
+		}
+	}
+}
+
+func runAgentContinuousMode(sandcatAgent *agent.Agent, c2Config map[string]string) {
+	// Comms should already be set up through C2Requirements Met
+	// Messages are already being accumulated, and outgoing messages are ready to be sent out
+	// What we need to do is to pull one server message at a time using GetBeaconBytes and process it
+
+	// Continuous beacon doesn't actually ping the server, just grabs the earliest unprocessed server message
+	serverMessage := sandcatAgent.Beacon()
+
+	for {
+		// Process server message
+		if len(serverMessage) == 0 {
+			// No instruction given from server, we just continue
+			continue
+		}
+		sandcatAgent.SetPaw(serverMessage["paw"].(string))
+	}
+}
+
+// Establish contact with C2 and run instructions.
+func runAgentBeaconMode(sandcatAgent *agent.Agent, c2Config map[string]string) {
 	// Start main execution loop.
 	watchdog := 0
 	checkin := time.Now()
